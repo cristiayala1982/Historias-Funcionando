@@ -50,7 +50,8 @@
           "microphonePermission": "Permitir que la app use el micrófono para el audio del video.",
           "recordAudioAndroid": true
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

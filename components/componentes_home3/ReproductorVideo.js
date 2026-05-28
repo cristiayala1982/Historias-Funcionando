@@ -1,12 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
 import { Dimensions, Image, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
-import Video from 'react-native-video';
 import BarraProgreso from './BarraProgreso';
 
 const { width } = Dimensions.get('window');
 
-// Función para transformar la ruta de Firebase en URL pública optimizada
 const obtenerUrlPublica = (path) => {
   if (!path) return null;
   if (path.startsWith('http')) return path;
@@ -14,75 +13,112 @@ const obtenerUrlPublica = (path) => {
   return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
 };
 
-export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario, irAnteriorUsuario, alCerrar }) {
+export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuario, irAnteriorUsuario, alCerrar }) {
   
   const [idxHistoria, setIdxHistoria] = useState(0);
   const [pausadoManual, setPausadoManual] = useState(false);
-  const [estaListo, setEstaListo] = useState(false); 
-  const [duracionVideo, setDuracionVideo] = useState(5000); 
   const [videoCargado, setVideoCargado] = useState(false); 
   const [mostrarMiniatura, setMostrarMiniatura] = useState(true);
+  const [duracionVideo, setDuracionVideo] = useState(5000);
 
   const historiasActuales = usuario?.historias || [];
   const historiaActual = historiasActuales[idxHistoria];
+  const historiaSiguiente = historiasActuales[idxHistoria + 1];
 
-  // Leemos dinámicamente la URL optimizada que guardará nuestra nueva Cloud Function
   const urlActual = obtenerUrlPublica(historiaActual?.url);
   const thumbnailActual = historiaActual?.thumbnail;
-
-  console.log("⚡ [REPRODUCTOR] Intentando cargar:", urlActual);
-
   const esFoto = historiaActual?.tipo === 'foto';
 
-  const tieneSiguienteInterno = idxHistoria < historiasActuales.length - 1;
-  const urlSiguienteInterna = tieneSiguienteInterno 
-    ? obtenerUrlPublica(historiasActuales[idxHistoria + 1]?.url) 
-    : null;
-    
-  const siguienteEsFoto = tieneSiguienteInterno ? historiasActuales[idxHistoria + 1]?.tipo === 'foto' : false;
-  const urlSiguienteFoto = (tieneSiguienteInterno && siguienteEsFoto) ? urlSiguienteInterna : null;
-  
+  const urlSiguiente = obtenerUrlPublica(historiaSiguiente?.url);
+  const siguienteEsFoto = historiaSiguiente?.tipo === 'foto';
+
   const estaMontadoRef = useRef(true);
+
+  // REPRODUCTOR A: Se encarga de los índices PARES (0, 2, 4...)
+  const playerA = useVideoPlayer(idxHistoria % 2 === 0 ? urlActual : (!siguienteEsFoto ? urlSiguiente : null), (p) => {
+    p.loop = false;
+  });
+
+  // REPRODUCTOR B: Se encarga de los índices IMPARES (1, 3, 5...)
+  const playerB = useVideoPlayer(idxHistoria % 2 !== 0 ? urlActual : (!siguienteEsFoto ? urlSiguiente : null), (p) => {
+    p.loop = false;
+  });
+
+  // Determinar cuál es el reproductor que debe sonar y verse AHORA
+  const reproductorActivo = idxHistoria % 2 === 0 ? playerA : playerB;
 
   useEffect(() => {
     estaMontadoRef.current = true;
     return () => { estaMontadoRef.current = false; };
   }, []);
 
+  // Sincronizar Play / Pause del reproductor activo e iniciar la precarga silenciosa del otro
   useEffect(() => {
-    if (estaActivo) {
-      setMostrarMiniatura(true);
-      setPausadoManual(false);
-      const tListo = setTimeout(() => {
-          if (estaMontadoRef.current) {
-            setEstaListo(true);
-            if (esFoto) {
-              setDuracionVideo(5000); 
-              setVideoCargado(true);
-              setMostrarMiniatura(false);
-            } else if (duracionVideo > 0) {
-              setVideoCargado(true);
-            }
-          }
-        }, 150);
-      return () => clearTimeout(tListo);
-    } else {
+    if (!estaActivo) {
+      playerA.pause();
+      playerB.pause();
+      return;
+    }
+
+    if (esFoto) {
+      playerA.pause();
+      playerB.pause();
+    } else if (reproductorActivo) {
+      if (!pausadoManual) {
+        reproductorActivo.muted = false;
+        reproductorActivo.play();
+      } else {
+        reproductorActivo.pause();
+      }
+    }
+  }, [estaActivo, pausadoManual, reproductorActivo, esFoto, idxHistoria]);
+
+  // Manejo del estado de carga, duración y fin del video
+  useEffect(() => {
+    if (!estaActivo) {
       setIdxHistoria(0);
       setVideoCargado(false);
-      setPausadoManual(false);
-      setEstaListo(false);
+      setMostrarMiniatura(true);
+      return;
     }
-  }, [estaActivo]);
 
-  useEffect(() => {
-    if (estaMontadoRef.current && estaActivo) {
-      setVideoCargado(false); 
-      setMostrarMiniatura(true); 
+    if (esFoto) {
+      setDuracionVideo(5000);
+      setVideoCargado(true);
+      setMostrarMiniatura(false);
+    } else if (reproductorActivo) {
+      
+      const verificarEstadoVideo = () => {
+        if (!estaMontadoRef.current) return;
+        const status = reproductorActivo.status?.state || reproductorActivo.status;
+        
+        if (status === 'readyToPlay') {
+          setVideoCargado(true);
+          setMostrarMiniatura(false);
+          if (reproductorActivo.duration) {
+            setDuracionVideo(reproductorActivo.duration * 1000);
+          }
+        }
+      };
+
+      const suscripcionStatus = reproductorActivo.addListener('statusChange', verificarEstadoVideo);
+      const suscripcionEnd = reproductorActivo.addListener('playToEnd', () => {
+        if (estaMontadoRef.current) irSiguiente();
+      });
+
+      verificarEstadoVideo();
+
+      return () => {
+        suscripcionStatus.remove();
+        suscripcionEnd.remove();
+      };
     }
-  }, [idxHistoria]);
+  }, [estaActivo, idxHistoria, esFoto, reproductorActivo]);
 
   const irSiguiente = () => {
     if (idxHistoria < historiasActuales.length - 1) {
+      setVideoCargado(false);
+      setMostrarMiniatura(true);
       setIdxHistoria(idxHistoria + 1);
     } else {
       irSiguienteUsuario();
@@ -90,6 +126,8 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
   };
 
   const irAnterior = () => {
+    setVideoCargado(false);
+    setMostrarMiniatura(true);
     if (idxHistoria > 0) {
       setIdxHistoria(idxHistoria - 1);
     } else {
@@ -103,6 +141,7 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
     <View style={styles.container}>
       <View style={StyleSheet.absoluteFill}>
         
+        {/* Renderizado de Fotos */}
         {urlActual && esFoto && (
           <Image
             source={{ uri: urlActual }}
@@ -117,62 +156,17 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
           />
         )}
 
-        {urlActual && !esFoto && (
-          <Video
-            source={{ uri: urlActual }}
+        {/* Renderizado de Videos utilizando el reproductor activo actual */}
+        {urlActual && !esFoto && reproductorActivo && (
+          <VideoView
+            player={reproductorActivo}
             style={StyleSheet.absoluteFill}
-            resizeMode="cover"
-            paused={!estaActivo || pausadoManual} 
-            onEnd={irSiguiente}
-            useTextureView={true} 
-            onLoad={(data) => {
-              if (data && data.duration) {
-                if (estaMontadoRef.current) {
-                  setDuracionVideo(data.duration * 1000);
-                  if (estaActivo) setVideoCargado(true); 
-                }
-              }
-            }}
-            onReadyForDisplay={() => {
-              if (estaMontadoRef.current && estaActivo) setMostrarMiniatura(false);
-            }}
-            bufferConfig={{
-              minBufferMs: 600,                  // Cambiar a 600
-              maxBufferMs: 1500,                 // Cambiar a 1500
-              bufferForPlaybackMs: 100,          // ¡Acá está el secreto! Cambiar a 100
-              bufferForPlaybackAfterRebufferMs: 400 // Cambiar a 400
-            }}
-            onError={(e) => console.log("❌ Error Video Activo:", e)}
+            contentFit="cover"
+            nativeControls={false}
           />
         )}
 
-        {estaActivo && estaListo && urlSiguienteInterna && !siguienteEsFoto && (
-          <View style={styles.motorOculto}>
-            <Video
-              source={{ uri: urlSiguienteInterna }}
-              paused={true}               // Volvemos a true para que no te trabe el video activo
-              preload="auto"              // ¡ESTO ES CLAVE! Le dice a Android que descargue aunque esté pausado
-              muted={true}
-              volume={0}
-              bufferConfig={{
-                minBufferMs: 600,
-                maxBufferMs: 1200,
-                bufferForPlaybackMs: 100,
-                bufferForPlaybackAfterRebufferMs: 400
-              }}
-              onError={(e) => console.log("ℹ️ Buffer interno preparándose")}
-            />
-          </View>
-        )}
-
-        {estaActivo && estaListo && urlSiguienteFoto && (
-          <Image
-            source={{ uri: urlSiguienteFoto }}
-            style={{ width: 1, height: 1, position: 'absolute', opacity: 0 }}
-            onLoad={() => console.log("⚡ [PRECARGA] Siguiente foto lista")}
-          />
-        )}
-
+        {/* Miniatura de Carga */}
         {(!videoCargado || mostrarMiniatura) && thumbnailActual && (
           <Image 
             source={{ uri: thumbnailActual }} 
@@ -181,6 +175,7 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
           />
         )}
 
+        {/* Capa de Toques */}
         <Pressable 
           style={styles.capaToques}
           onPress={(evt) => {
@@ -212,6 +207,5 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'black' },
   capaToques: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 10 },
-  motorOculto: { width: 1, height: 1, opacity: 0, position: 'absolute' },
   botonX: { position: 'absolute', top: 55, right: 20, zIndex: 30 }
 });
