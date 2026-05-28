@@ -7,7 +7,7 @@ import { BackHandler, Dimensions, FlatList, Modal, ScrollView, StyleSheet, Text,
 
 // --- COMPONENTES ---
 import CamaraLab3 from '../../../components/camara/CamaraLab3';
-import ReproductorItem from '../../../components/componentes_home3/ReproductorHLS'; // Ahora actúa como ítem individual
+import ReproductorItem from '../../../components/componentes_home3/ReproductorVideo.js'; // Ahora actúa como ítem individual
 
 // --- FIREBASE ---
 import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore';
@@ -49,10 +49,6 @@ export default function Home3() {
           setMostrarCamara(false);
           return true; // Bloquea y solo cierra la cámara
         }
-        
-        // AQUÍ ESTÁ EL TRUCO:
-        // Si no hay modales, ignoramos por completo el historial de Expo
-        // y lo mandamos de un solo viaje al menú principal limpiando la pila.
         router.replace('/'); 
         return true; // Retornar true le dice a Android: "Yo ya me encargué de la acción, no hagas nada más"
       };

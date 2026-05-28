@@ -2,9 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import { Dimensions, Image, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 import Video from 'react-native-video';
-import BarraProgreso from './BarraProgreso'; // Asegurá que la ruta sea correcta
+import BarraProgreso from './BarraProgreso';
 
 const { width } = Dimensions.get('window');
+
+// Función para transformar la ruta de Firebase en URL pública optimizada
+const obtenerUrlPublica = (path) => {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  const bucket = "historiaslab-7672a.firebasestorage.app";
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+};
 
 export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario, irAnteriorUsuario, alCerrar }) {
   
@@ -17,15 +25,23 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
 
   const historiasActuales = usuario?.historias || [];
   const historiaActual = historiasActuales[idxHistoria];
-  const urlActual = historiasActuales[idxHistoria]?.url;
-  const thumbnailActual = historiasActuales[idxHistoria]?.thumbnail;
+
+  // Leemos dinámicamente la URL optimizada que guardará nuestra nueva Cloud Function
+  const urlActual = obtenerUrlPublica(historiaActual?.url);
+  const thumbnailActual = historiaActual?.thumbnail;
+
+  console.log("⚡ [REPRODUCTOR] Intentando cargar:", urlActual);
+
   const esFoto = historiaActual?.tipo === 'foto';
 
   const tieneSiguienteInterno = idxHistoria < historiasActuales.length - 1;
-  const urlSiguienteInterna = tieneSiguienteInterno ? historiasActuales[idxHistoria + 1]?.url : null;
+  const urlSiguienteInterna = tieneSiguienteInterno 
+    ? obtenerUrlPublica(historiasActuales[idxHistoria + 1]?.url) 
+    : null;
+    
   const siguienteEsFoto = tieneSiguienteInterno ? historiasActuales[idxHistoria + 1]?.tipo === 'foto' : false;
-  // ⚡ NUEVO: Guardamos la url si la que viene es foto para mandarla a la precarga
   const urlSiguienteFoto = (tieneSiguienteInterno && siguienteEsFoto) ? urlSiguienteInterna : null;
+  
   const estaMontadoRef = useRef(true);
 
   useEffect(() => {
@@ -33,19 +49,14 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
     return () => { estaMontadoRef.current = false; };
   }, []);
 
-  // Sincronización absoluta al activar/desactivar la celda en el FlatList horizontal
   useEffect(() => {
     if (estaActivo) {
       setMostrarMiniatura(true);
       setPausadoManual(false);
-      
-      // La barra y el estado "listo" esperan un instante para no saturar
       const tListo = setTimeout(() => {
           if (estaMontadoRef.current) {
             setEstaListo(true);
-            
             if (esFoto) {
-              // 📸 Si es foto, activa la barra al toque con 5 segundos fijos
               setDuracionVideo(5000); 
               setVideoCargado(true);
               setMostrarMiniatura(false);
@@ -53,11 +64,9 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
               setVideoCargado(true);
             }
           }
-        }, 250);
-
+        }, 150);
       return () => clearTimeout(tListo);
     } else {
-      // Al salir, solo reseteamos el índice interno y los buffers secundarios
       setIdxHistoria(0);
       setVideoCargado(false);
       setPausadoManual(false);
@@ -65,7 +74,6 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
     }
   }, [estaActivo]);
 
-  // Reset al cambiar de historia interna (mismo usuario)
   useEffect(() => {
     if (estaMontadoRef.current && estaActivo) {
       setVideoCargado(false); 
@@ -93,86 +101,78 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
 
   return (
     <View style={styles.container}>
-      
       <View style={StyleSheet.absoluteFill}>
         
-        {/* 📸 SI ES FOTO: Mostramos la imagen nativa sin usar el motor de video */}
-{/* 📸 SI ES FOTO: Con onLoad para evitar pantallas negras intermedias */}
-{urlActual && esFoto && (
-  <Image
-    source={{ uri: urlActual }}
-    style={StyleSheet.absoluteFill}
-    resizeMode="cover"
-    onLoad={() => {
-      if (estaMontadoRef.current && estaActivo) {
-        setVideoCargado(true); // Arranca la barrita de progreso
-        setMostrarMiniatura(false); // Apaga el escudo visual sin baches
-      }
-    }}
-  />
-)}
-
-{/* 🎥 SI ES VIDEO: Dejamos tu motor exactamente igual, pero sumamos !esFoto */}
-{urlActual && !esFoto && (
-        <Video
-          source={{ uri: urlActual }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-          paused={!estaActivo || pausadoManual} 
-          onEnd={irSiguiente}
-          useTextureView={true} 
-          onLoad={(data) => {
-            if (data && data.duration) {
-              const msReales = data.duration * 1000;
-              if (estaMontadoRef.current) {
-                setDuracionVideo(msReales);
-                if (estaActivo) setVideoCargado(true); 
+        {urlActual && esFoto && (
+          <Image
+            source={{ uri: urlActual }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            onLoad={() => {
+              if (estaMontadoRef.current && estaActivo) {
+                setVideoCargado(true);
+                setMostrarMiniatura(false);
               }
-            }
-          }}
-          onReadyForDisplay={() => {
-            if (estaMontadoRef.current && estaActivo) {
-              setMostrarMiniatura(false);
-            }
-          }}
-          bufferConfig={{
-            minBufferMs: 1000,
-            maxBufferMs: 2500,
-            bufferForPlaybackMs: 300,   
-            bufferForPlaybackAfterRebufferMs: 800
-          }}
-          onError={(e) => console.log("❌ Error Video Activo:", e)}
-        />
-      )}
+            }}
+          />
+        )}
 
-        {/* MOTOR 2: ESPEJO PRECARGA INTERNA (Este sí queda condicionado a estar quieto) */}
-         {/* MOTOR 2: ESPEJO PRECARGA INTERNA */}
+        {urlActual && !esFoto && (
+          <Video
+            source={{ uri: urlActual }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            paused={!estaActivo || pausadoManual} 
+            onEnd={irSiguiente}
+            useTextureView={true} 
+            onLoad={(data) => {
+              if (data && data.duration) {
+                if (estaMontadoRef.current) {
+                  setDuracionVideo(data.duration * 1000);
+                  if (estaActivo) setVideoCargado(true); 
+                }
+              }
+            }}
+            onReadyForDisplay={() => {
+              if (estaMontadoRef.current && estaActivo) setMostrarMiniatura(false);
+            }}
+            bufferConfig={{
+              minBufferMs: 600,                  // Cambiar a 600
+              maxBufferMs: 1500,                 // Cambiar a 1500
+              bufferForPlaybackMs: 100,          // ¡Acá está el secreto! Cambiar a 100
+              bufferForPlaybackAfterRebufferMs: 400 // Cambiar a 400
+            }}
+            onError={(e) => console.log("❌ Error Video Activo:", e)}
+          />
+        )}
+
         {estaActivo && estaListo && urlSiguienteInterna && !siguienteEsFoto && (
           <View style={styles.motorOculto}>
             <Video
               source={{ uri: urlSiguienteInterna }}
-              paused={true} 
-              useTextureView={true}
+              paused={true}               // Volvemos a true para que no te trabe el video activo
+              preload="auto"              // ¡ESTO ES CLAVE! Le dice a Android que descargue aunque esté pausado
+              muted={true}
+              volume={0}
               bufferConfig={{
-                minBufferMs: 1500,
-                maxBufferMs: 3000,
-                bufferForPlaybackMs: 500,
-                bufferForPlaybackAfterRebufferMs: 1000
+                minBufferMs: 600,
+                maxBufferMs: 1200,
+                bufferForPlaybackMs: 100,
+                bufferForPlaybackAfterRebufferMs: 400
               }}
               onError={(e) => console.log("ℹ️ Buffer interno preparándose")}
             />
           </View>
         )}
 
-        {/* 📸 MOTOR 3: ESPEJO PRECARGA PARA FOTOS (Invisible de 1x1 píxel) */}
-          {estaActivo && estaListo && urlSiguienteFoto && (
-            <Image
-              source={{ uri: urlSiguienteFoto }}
-              style={{ width: 1, height: 1, position: 'absolute', opacity: 0 }}
-              onLoad={() => console.log("⚡ [PRECARGA] Siguiente foto lista en caché")}
-            />
-          )}
-        {/* CAPA DE MINIATURA CONTROLADA */}
+        {estaActivo && estaListo && urlSiguienteFoto && (
+          <Image
+            source={{ uri: urlSiguienteFoto }}
+            style={{ width: 1, height: 1, position: 'absolute', opacity: 0 }}
+            onLoad={() => console.log("⚡ [PRECARGA] Siguiente foto lista")}
+          />
+        )}
+
         {(!videoCargado || mostrarMiniatura) && thumbnailActual && (
           <Image 
             source={{ uri: thumbnailActual }} 
@@ -181,28 +181,17 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
           />
         )}
 
-        {/* CAPA DE TOQUES TÁCTILES */}
         <Pressable 
           style={styles.capaToques}
-          delayLongPress={250}
-          pressRetentionOffset={{ top: 150, bottom: 150, left: 150, right: 150 }}
           onPress={(evt) => {
             if (!estaActivo) return;
-            const toqueX = evt.nativeEvent.locationX;
-            if (toqueX < width / 3) {
-              irAnterior();
-            } else {
-              irSiguiente();
-            }
+            evt.nativeEvent.locationX < width / 3 ? irAnterior() : irSiguiente();
           }}
           onLongPress={() => setPausadoManual(true)}
-          onPressOut={() => {
-            if (pausadoManual) setPausadoManual(false);
-          }}
+          onPressOut={() => setPausadoManual(false)}
         />
       </View>
 
-      {/* BARRA DE PROGRESO AISLADA */}
       <BarraProgreso
         historias={historiasActuales}
         idxHistoria={idxHistoria}
@@ -213,7 +202,6 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
         onTiempoCompleto={irSiguiente}
       />
 
-      {/* BOTÓN CERRAR */}
       <TouchableOpacity style={styles.botonX} onPress={alCerrar}>
         <Ionicons name="close" size={34} color="white" />
       </TouchableOpacity>
@@ -223,7 +211,7 @@ export default function ReproductorHLS({ usuario, estaActivo, irSiguienteUsuario
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'black' },
-  capaToques: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'transparent', zIndex: 10 },
+  capaToques: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 10 },
   motorOculto: { width: 1, height: 1, opacity: 0, position: 'absolute' },
   botonX: { position: 'absolute', top: 55, right: 20, zIndex: 30 }
 });
