@@ -1,3 +1,4 @@
+//todo vista previa de foto/video con botones de publicar/descartar
 import { Ionicons } from '@expo/vector-icons';
 import { Dimensions, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Video from 'react-native-video';
