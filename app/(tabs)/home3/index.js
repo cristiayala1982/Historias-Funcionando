@@ -3,12 +3,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, Dimensions, FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { BackHandler, Dimensions, FlatList, Modal, NativeModules, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 // --- COMPONENTES ---
-import CamaraLab3 from '../../../components/camara/CamaraLab3';
-import ReproductorItem from '../../../components/componentes_home3/ReproductorVideo.js'; // Ahora actúa como ítem individual
-
+import VistaPrevia from '../../../components/camara/VistaPrevia';
+import { comprimirVideoPro } from '../../../components/componentes_home3/compresor3';
+import ReproductorItem from '../../../components/componentes_home3/ReproductorVideo.js';
 // --- FIREBASE ---
 import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
@@ -27,35 +27,34 @@ export default function Home3() {
   const [mostrarReproductor, setMostrarReproductor] = useState(false);
 
   const [publicandoId, setPublicandoId] = useState(null);
-  const [mostrarCamara, setMostrarCamara] = useState(false);
   const [idDestino, setIdDestino] = useState(null);
   const [progresoSubida, setProgresoSubida] = useState(0);
-  
+  const [archivoCapturado, setArchivoCapturado] = useState(null); // <-- ARCHIVO DE KOTLIN
   const router = useRouter(); 
   const flatListRef = useRef(null);
 
   // Filtrar solo los usuarios que tienen historias listas
   const usuariosConHistorias = usuarios.filter(u => u.publicado && u.historias && u.historias.length > 0);
 
-// --- CONTROL DEL BOTÓN ATRÁS DEFENSIVO ---
+  // --- CONTROL DEL BOTÓN ATRÁS DEFENSIVO ---
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {
+        if (archivoCapturado) {
+          setArchivoCapturado(null); // Descarta la vista previa si está abierta
+          return true;
+        }
         if (mostrarReproductor) {
           cerrarReproductor();
-          return true; // Bloquea y solo cierra el modal
-        }
-        if (mostrarCamara) {
-          setMostrarCamara(false);
-          return true; // Bloquea y solo cierra la cámara
+          return true; 
         }
         router.replace('/'); 
-        return true; // Retornar true le dice a Android: "Yo ya me encargué de la acción, no hagas nada más"
+        return true; 
       };
 
       const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
       return () => subscription.remove(); 
-    }, [mostrarReproductor, mostrarCamara])
+    }, [mostrarReproductor, archivoCapturado])
   );
 
   // --- OCULTAR TABS EN REPRODUCTOR ---
@@ -105,21 +104,40 @@ export default function Home3() {
     setNuevoNombre('');
   };
 
-    const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo }) => {
-    setMostrarCamara(false);
+// --- LEVANTAR CÁMARA NATIVA EN KOTLIN (CON COMPRESIÓN AL INSTANTE COMO ANTES) ---
+ const levantarCamaraKotlin = async (usuarioId) => {
+    if (NativeModules.HistoriasLabNative) {
+      try {
+        setIdDestino(usuarioId);
+        const rutaCrudaAndroid = await NativeModules.HistoriasLabNative.abrirCamaraHistorias();
+        const esVideo = rutaCrudaAndroid.endsWith('.mp4');
+        
+        setArchivoCapturado({
+          tipo: esVideo ? 'video' : 'foto',
+          uri: `file://${rutaCrudaAndroid}`
+        });
+      } catch (error) {
+        console.log("ℹ️ Captura nativa cancelada o falló.");
+      }
+    }
+  };
+
+// --- FUNCIÓN RESTAURADA A SU ESTADO ORIGINAL ---
+  const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo }) => {
     setPublicandoId(idUsuarioDestino);
 
     try {
       const archivoId = `${idUsuarioDestino}_${Date.now()}`;
+      
+      // Volvemos a tu fetch original que lee el archivo en el disco
       const respuesta = await fetch(uri);
       const blobArchivo = await respuesta.blob();
 
-      // 📁 DETERMINAMOS LA CARPETA Y EXTENSIÓN SEGÚN EL TIPO
-      let storagePath = `hls_lab/${archivoId}.mp4`; // Por defecto video
+      let storagePath = `hls_lab/${archivoId}.mp4`; 
       let metadata = {};
 
       if (tipo === 'foto') {
-        storagePath = `fotos_lab/${archivoId}.jpg`; // 📸 Carpeta limpia de fotos
+        storagePath = `fotos_lab/${archivoId}.jpg`; 
         metadata = { contentType: 'image/jpeg' };
       }
 
@@ -137,7 +155,6 @@ export default function Home3() {
           const urlPrincipal = await getDownloadURL(uploadTask.snapshot.ref);
           let urlThumbnail = null;
 
-          // Las miniaturas solo aplican si es un video (las fotos no necesitan otra miniatura extra)
           if (thumbnailUri && tipo !== 'foto') {
             try {
               const resThumb = await fetch(thumbnailUri);
@@ -154,12 +171,11 @@ export default function Home3() {
             }
           }
 
-          // 📝 GUARDAMOS EN FIRESTORE CON SU TIPO REAL
           const tipoFirestore = tipo === 'foto' ? 'foto' : 'hls_pending';
 
           await addDoc(collection(db, "historias_hls"), { 
             url: urlPrincipal, 
-            thumbnail: tipo === 'foto' ? urlPrincipal : urlThumbnail, // Si es foto, la miniatura es la foto misma
+            thumbnail: tipo === 'foto' ? urlPrincipal : urlThumbnail, 
             usuarioId: idUsuarioDestino, 
             fecha: serverTimestamp(),
             tipo: tipoFirestore 
@@ -167,7 +183,6 @@ export default function Home3() {
 
           console.log(`✅ [FIRESTORE] Registro creado con tipo: ${tipoFirestore}`);
 
-          // Limpieza de archivos temporales del celu
           try {
             await FileSystem.deleteAsync(uri, { idempotent: true });
             if (thumbnailUri) await FileSystem.deleteAsync(thumbnailUri, { idempotent: true });
@@ -193,7 +208,6 @@ export default function Home3() {
     setIndiceUsuarioActivo(null);
   };
 
-  // Escucha el cambio de página manual por deslizamiento (Swipe)
   const alCambiarDeCelda = useRef(({ viewableItems }) => {
     if (viewableItems.length > 0) {
       const nuevoIndex = viewableItems[0].index;
@@ -201,14 +215,46 @@ export default function Home3() {
     }
   }).current;
 
-  if (mostrarCamara) return (
-    <View style={styles.cameraContainer}>
-      <CamaraLab3 idUsuario={idDestino} onVideoGrabado={finalizarYSubirHLS} />
-      <TouchableOpacity style={styles.btnCerrarCam} onPress={() => setMostrarCamara(false)}>
-        <Ionicons name="close" size={35} color="white" />
-      </TouchableOpacity>
-    </View>
-  );
+ // === INTERRUPTOR 1: MOSTRAR VISTA PREVIA ===
+  if (archivoCapturado) {
+    return (
+      <VistaPrevia 
+        archivo={archivoCapturado} 
+        onDescartar={() => setArchivoCapturado(null)} 
+        onPublicar={async () => {
+          // 1. Activamos al toque el porcentaje en el usuario de la lista
+          setPublicandoId(idDestino);
+          setProgresoSubida(0);
+          
+          // 2. Cerramos la vista previa YA para volver a la pantalla principal
+          const infoArchivo = { ...archivoCapturado };
+          setArchivoCapturado(null); 
+
+          // 3. Dejamos corriendo la compresión y la subida de fondo en silencio
+          (async () => {
+            let rutaFinal = infoArchivo.uri;
+
+            if (infoArchivo.tipo === 'video') {
+              try {
+                console.log("⚙️ Compresor corriendo de fondo...");
+                rutaFinal = await comprimirVideoPro(infoArchivo.uri);
+              } catch (err) {
+                console.log("⚠️ Error compresor, usando original.");
+              }
+            }
+
+            // Se lo mandamos a tu función de siempre para que empiece a subir el porcentaje
+            await finalizarYSubirHLS({
+              uri: rutaFinal,
+              thumbnailUri: null,
+              idUsuarioDestino: idDestino,
+              tipo: infoArchivo.tipo
+            });
+          })();
+        }} 
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -231,36 +277,53 @@ export default function Home3() {
       </View>
 
       <ScrollView style={styles.listaUsuarios} contentContainerStyle={{ paddingBottom: 100 }}>
-        {usuarios.map(u => (
-          <View key={u.id} style={styles.tarjetaTester}>
-            <TouchableOpacity 
-              style={[styles.avatar, { backgroundColor: u.color || '#007AFF' }]} 
-              onPress={() => {
-                const idxFiltrado = usuariosConHistorias.findIndex(user => user.id === u.id);
-                if (idxFiltrado !== -1) abrirReproductor(idxFiltrado);
-              }}
-            >
-              <Text style={styles.avatarTxt}>{u.nombre ? u.nombre.substring(0, 2).toUpperCase() : 'U'}</Text>
-            </TouchableOpacity>
-            
-            <View style={styles.infoTester}>
-              <Text style={styles.nombreTester}>{u.nombre}</Text>
-              {publicandoId === u.id && (
-                <Text style={styles.subiendoTxt}>Subiendo: {Math.round(progresoSubida)}%</Text>
-              )}
-            </View>
+        {usuarios.map(u => {
+          const cantidadHistorias = u.historias?.length || 0;
 
-            <TouchableOpacity style={styles.btnMas} onPress={() => {
-              setIdDestino(u.id); 
-              setMostrarCamara(true);
-            }}>
-              <Ionicons name="add-circle" size={35} color="#007AFF" />
-            </TouchableOpacity>
-          </View>
-        ))}
+          return (
+            <View key={u.id} style={styles.tarjetaTester}>
+              
+              {/* AVATAR + CONTADOR */}
+              <View style={styles.avatarContenedor}>
+                <TouchableOpacity 
+                  style={[styles.avatar, { backgroundColor: u.color || '#007AFF' }]} 
+                  onPress={() => {
+                    const idxFiltrado = usuariosConHistorias.findIndex(user => user.id === u.id);
+                    if (idxFiltrado !== -1) abrirReproductor(idxFiltrado);
+                  }}
+                >
+                  <Text style={styles.avatarTxt}>
+                    {u.nombre ? u.nombre.substring(0, 2).toUpperCase() : 'U'}
+                  </Text>
+                </TouchableOpacity>
+
+                {cantidadHistorias > 0 && (
+                  <View style={styles.globoContador}>
+                    <Text style={styles.textoContador}>{cantidadHistorias}</Text>
+                  </View>
+                )}
+              </View>
+              
+              {/* INFO + PORCENTAJE */}
+              <View style={styles.infoTester}>
+                <Text style={styles.nombreTester}>{u.nombre}</Text>
+                {publicandoId === u.id && (
+                  <Text style={styles.subiendoTxt}>
+                    ⚡ Subiendo: {Math.round(progresoSubida)}%
+                  </Text>
+                )}
+              </View>
+
+              {/* DISPARADOR DE CÁMARA KOTLIN */}
+              <TouchableOpacity style={styles.btnMas} onPress={() => levantarCamaraKotlin(u.id)}>
+                <Ionicons name="add-circle" size={38} color="#007AFF" />
+              </TouchableOpacity>
+            </View>
+          );
+        })}
       </ScrollView>
 
-      {/* CARRUSEL DE PRECARGA NATIVO ESTILO INSTAGRAM */}
+      {/* CARRUSEL DE PRECARGA */}
       <Modal visible={mostrarReproductor} transparent={false} animationType="fade" onRequestClose={cerrarReproductor}>
         <View style={styles.modalContainer}>
           <FlatList
@@ -273,12 +336,12 @@ export default function Home3() {
             initialScrollIndex={indiceUsuarioActivo}
             getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
             onViewableItemsChanged={alCambiarDeCelda}
-            viewabilityConfig={{ itemVisiblePercentThreshold: 60 }} // Evita gatillar reproducciones falsas
+            viewabilityConfig={{ itemVisiblePercentThreshold: 60 }} 
             renderItem={({ item, index }) => (
               <View style={{ width, height }}>
                 <ReproductorItem
                   usuario={item}
-                  estaActivo={index === indiceUsuarioActivo} // <-- CLAVE: Le dice al motor si debe reproducirse o precargarse
+                  estaActivo={index === indiceUsuarioActivo} 
                   irSiguienteUsuario={() => {
                     if (index < usuariosConHistorias.length - 1) {
                       flatListRef.current?.scrollToIndex({ index: index + 1, animated: true });
@@ -302,6 +365,8 @@ export default function Home3() {
   );
 }
 
+// Tus estilos se mantienen intactos tal cual los tenés guardados abajo...
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   modalContainer: { flex: 1, backgroundColor: 'black' },
@@ -314,11 +379,78 @@ const styles = StyleSheet.create({
   listaUsuarios: { flex: 1, marginTop: 10, paddingHorizontal: 20 },
   cameraContainer: { flex: 1, backgroundColor: 'black' },
   btnCerrarCam: { position: 'absolute', top: 50, left: 20, backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 25 },
-  tarjetaTester: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9F9F9', padding: 15, borderRadius: 15, marginBottom: 10, borderWidth: 1, borderColor: '#EEE' },
-  avatar: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
+  
+  // Modificado: Se le dio un pelín más de padding
+  tarjetaTester: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#F9F9F9', 
+    padding: 16, 
+    borderRadius: 18, 
+    marginBottom: 12, 
+    borderWidth: 1, 
+    borderColor: '#EAEAEA' 
+  },
+
+  // ¡NUEVO! Contenedor que encierra al avatar y permite al globo flotar en la esquina
+  avatarContenedor: {
+    position: 'relative',
+    width: 54,
+    height: 54,
+  },
+
+  // Modificado: Crecieron a 54px para darle mejor presencia con el globo
+  avatar: { 
+    width: 54, 
+    height: 54, 
+    borderRadius: 27, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
   avatarTxt: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-  infoTester: { flex: 1, marginLeft: 15 },
-  nombreTester: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  subiendoTxt: { fontSize: 12, color: '#007AFF', marginTop: 2 },
+
+  // ¡NUEVO! El globo celeste luminoso con sombra para que resalte
+  globoContador: {
+    position: 'absolute',
+    bottom: -2,
+    right: -4,
+    backgroundColor: '#00B4DB', // Color celeste claro vivo
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#FFFFFF', // Línea blanca divisoria
+    elevation: 4, // Sombra para Android
+    shadowColor: '#000', // Sombra para iOS
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.23,
+    shadowRadius: 2.62,
+  },
+
+  // ¡NUEVO! Texto de la cantidad de historias (Bien visible y grueso)
+  textoContador: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+
+  // Modificado: Ajustado el margen izquierdo a 18 para no pisarse con el globo
+  infoTester: { flex: 1, marginLeft: 18 },
+
+  // Modificado: Subió el tamaño de la letra a 17 para equilibrar el diseño
+  nombreTester: { fontSize: 17, fontWeight: 'bold', color: '#212529' },
+
+  // Modificado: ¡Letras grandes de subida! Saltó a 14px, negrita gruesa y un coral vibrante
+  subiendoTxt: { 
+    fontSize: 14, 
+    fontWeight: '700', 
+    color: '#FF512F', 
+    marginTop: 4 
+  },
+
   btnMas: { padding: 5 }
 });

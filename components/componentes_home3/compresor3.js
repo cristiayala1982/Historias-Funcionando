@@ -4,23 +4,32 @@ import { Video } from 'react-native-compressor';
 
 export const comprimirVideoPro = async (uriOriginal) => {
   try {
-    console.log("💾 [DISCO] Video original guardado en temporales:", uriOriginal);
+    console.log("💾 [DISCO - INICIO] Recibiendo video original para optimizar:", uriOriginal);
 
-    console.log("⚙️ Iniciando compresión...");
+    console.log("⚙️ [MOTOR] Iniciando compresión nativa con react-native-compressor...");
+    
+    // El motor comprime el archivo usando el procesador nativo del celular
     const uriComprimida = await Video.compress(
       uriOriginal,
-      { compressionMethod: 'auto' }
+      { compressionMethod: 'auto' } // Mantiene una excelente calidad equilibrada
     );
 
-    console.log("✅ [DISCO] Video comprimido creado:", uriComprimida);
+    console.log("✅ [DISCO - ÉXITO] ¡Video comprimido creado con éxito! Nueva ruta:", uriComprimida);
 
-    // ELIMINACIÓN DEL ORIGINAL (Para no llenar la memoria)
-    await FileSystem.deleteAsync(uriOriginal, { idempotent: true });
-    console.log("🗑️ [SISTEMA] Video original eliminado para liberar espacio.");
+    // Formateamos la ruta original por seguridad para que Expo FileSystem la borre bien
+    // (A veces FileSystem necesita la ruta sin el prefijo 'file://' en Android)
+    const rutaParaBorrar = uriOriginal.startsWith('file://') ? uriOriginal : `file://${uriOriginal}`;
 
-    return uriComprimida;
+    console.log("🗑️ [SISTEMA] Intentando eliminar el video original pesado de:", rutaParaBorrar);
+    
+    // ELIMINACIÓN DEL ORIGINAL DE KOTLIN (Para limpiar el disco de inmediato)
+    await FileSystem.deleteAsync(rutaParaBorrar, { idempotent: true });
+    
+    console.log("🗑️ [SISTEMA] ¡Video original eliminado correctamente del disco!");
+
+    return uriComprimida; // Devolvemos el video optimizado y liviano listo para subir
   } catch (error) {
-    console.error("❌ Error en el motor de compresión:", error);
+    console.error("❌ [ERROR CRÍTICO COMPRESOR] Falló el proceso de compresión:", error);
     throw error;
   }
 };

@@ -1,22 +1,40 @@
 import * as Device from 'expo-device';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-// IMPORTANTE: Agregamos NativeModules acá abajo
-import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+// 💥 Agregamos PermissionsAndroid y Platform acá abajo
+import { PermissionsAndroid, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function MenuLaboratorio() {
   const router = useRouter();
   const [info, setInfo] = useState({ modelo: '', ram: 0, perfil: '' });
 
   useEffect(() => {
+    // 1. Configuración de información del dispositivo
     const ramTotal = Device.totalMemory ? Device.totalMemory / (1024 ** 3) : 0;
     const modelo = Device.modelName || "Celular";
     let perfilAsignado = ramTotal > 4 ? "GAMA ALTA" : "GAMA BAJA";
     setInfo({ modelo, ram: ramTotal.toFixed(2), perfil: perfilAsignado });
+
+    // 2. 🚀 SOLICITUD DE PERMISOS AUTOMÁTICA AL INSTALAR/ARRANCAR
+    const solicitarPermisosIniciales = async () => {
+      if (Platform.OS === 'android') {
+        try {
+          // Esto pide Cámara y Micrófono juntos de una sola vez y no vuelve a molestar
+          await PermissionsAndroid.requestMultiple([
+            PermissionsAndroid.PERMISSIONS.CAMERA,
+            PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          ]);
+        } catch (err) {
+          console.warn("Error al solicitar permisos en el arranque:", err);
+        }
+      }
+    };
+
+    solicitarPermisosIniciales();
   }, []);
 
   // Función para manejar el botón de Historias Kotlin
-   const manejarHistoriasKotlin = () => {
+  const manejarHistoriasKotlin = () => {
     router.push('/(tabs)/homekotlin');
   };
 

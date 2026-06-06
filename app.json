@@ -41,7 +41,6 @@
           }
         }
       ],
-      "react-native-video",
       "react-native-compressor",
       [
         "expo-camera",
@@ -51,7 +50,7 @@
           "recordAudioAndroid": true
         }
       ],
-      "expo-video"
+      "expo-video",
     ],
     "experiments": {
       "typedRoutes": true,
