@@ -6,7 +6,7 @@ export const comprimirVideoPro = async (uriOriginal) => {
   try {
     console.log("💾 [DISCO - INICIO] Recibiendo video original para optimizar:", uriOriginal);
 
-    console.log("⚙️ [MOTOR] Iniciando compresión nativa con react-native-compressor...");
+    console.log("⚙️ [MOTOR] Iniciando compresión ,nativa con react-native-compressor...");
     
     // El motor comprime el archivo usando el procesador nativo del celular
     const uriComprimida = await Video.compress(

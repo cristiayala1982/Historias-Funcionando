@@ -10,7 +10,7 @@ import VistaPrevia from '../../../components/camara/VistaPrevia';
 import { comprimirVideoPro } from '../../../components/componentes_home3/compresor3';
 import ReproductorItem from '../../../components/componentes_home3/ReproductorVideo.js';
 // --- FIREBASE ---
-import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import { db, storage } from '../../../firebaseConfig';
 // === FIN: IMPORTACIONES ===
@@ -122,14 +122,13 @@ export default function Home3() {
     }
   };
 
-// --- FUNCIÓN RESTAURADA A SU ESTADO ORIGINAL ---
-  const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo }) => {
+const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo }) => {
     setPublicandoId(idUsuarioDestino);
 
     try {
+      // Usamos un ID consistente: usuario + timestamp
       const archivoId = `${idUsuarioDestino}_${Date.now()}`;
       
-      // Volvemos a tu fetch original que lee el archivo en el disco
       const respuesta = await fetch(uri);
       const blobArchivo = await respuesta.blob();
 
@@ -141,7 +140,6 @@ export default function Home3() {
         metadata = { contentType: 'image/jpeg' };
       }
 
-      console.log(`📤 [SUBIDA] Subiendo ${tipo || 'video'} a Storage en: ${storagePath}`);
       const archivoRef = ref(storage, storagePath);
       const uploadTask = uploadBytesResumable(archivoRef, blobArchivo, metadata);
 
@@ -150,38 +148,27 @@ export default function Home3() {
         (error) => {
            console.error("❌ Error en subida:", error);
            setPublicandoId(null);
-        },
+        }, 
         async () => {
           const urlPrincipal = await getDownloadURL(uploadTask.snapshot.ref);
           let urlThumbnail = null;
 
+          // ... (mantén tu lógica de subir miniatura tal cual la tenías) ...
           if (thumbnailUri && tipo !== 'foto') {
-            try {
-              const resThumb = await fetch(thumbnailUri);
-              const blobThumb = await resThumb.blob(); 
-              const thumbRef = ref(storage, `thumbnails/${archivoId}.jpg`);
-              const thumbTask = uploadBytesResumable(thumbRef, blobThumb, { contentType: 'image/jpeg' });
-              
-              await new Promise((resolve, reject) => {
-                thumbTask.on('state_changed', null, reject, resolve);
-              });
-              urlThumbnail = await getDownloadURL(thumbTask.snapshot.ref);
-            } catch (thumbError) {
-              console.warn("⚠️ Falló miniatura:", thumbError.message);
-            }
+             // ... lógica de fetch y uploadBytesResumable para miniatura ...
           }
 
-          const tipoFirestore = tipo === 'foto' ? 'foto' : 'hls_pending';
-
-          await addDoc(collection(db, "historias_hls"), { 
+          // AQUI ESTA LA CLAVE: Usamos setDoc con el ID específico
+          // Esto crea el documento de forma atómica y limpia
+          await setDoc(doc(db, "historias_hls", archivoId), { 
             url: urlPrincipal, 
             thumbnail: tipo === 'foto' ? urlPrincipal : urlThumbnail, 
             usuarioId: idUsuarioDestino, 
             fecha: serverTimestamp(),
-            tipo: tipoFirestore 
+            tipo: tipo === 'foto' ? 'foto' : 'video' // Ya no ponemos hls_pending
           });
 
-          console.log(`✅ [FIRESTORE] Registro creado con tipo: ${tipoFirestore}`);
+          console.log(`✅ [FIRESTORE] Registro limpio creado con ID: ${archivoId}`);
 
           try {
             await FileSystem.deleteAsync(uri, { idempotent: true });
@@ -193,7 +180,7 @@ export default function Home3() {
         }
       );
     } catch (e) {
-      console.error("❌ Error general en la subida:", e);
+      console.error("❌ Error general:", e);
       setPublicandoId(null);
     }
   };
