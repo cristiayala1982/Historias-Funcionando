@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
-import { Dimensions, Image, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Image, Pressable, StyleSheet, TouchableOpacity, View } from 'react-native';
 import BarraProgreso from './BarraProgreso';
 
 const { width } = Dimensions.get('window');
@@ -13,7 +13,7 @@ const obtenerUrlPublica = (path) => {
   return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
 };
 
-export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuario, irAnteriorUsuario, alCerrar }) {
+export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuario, irAnteriorUsuario, alCerrar, onEliminarHistoria }) {
   
   const [idxHistoria, setIdxHistoria] = useState(0);
   const [pausadoManual, setPausadoManual] = useState(false);
@@ -115,6 +115,12 @@ export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuar
     }
   }, [estaActivo, idxHistoria, esFoto, reproductorActivo]);
 
+  useEffect(() => {
+    if (idxHistoria > historiasActuales.length - 1) {
+      setIdxHistoria(Math.max(0, historiasActuales.length - 1));
+    }
+  }, [historiasActuales.length, idxHistoria]);
+
   const irSiguiente = () => {
     if (idxHistoria < historiasActuales.length - 1) {
       setVideoCargado(false);
@@ -133,6 +139,25 @@ export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuar
     } else {
       irAnteriorUsuario();
     }
+  };
+
+  const confirmarEliminarHistoriaActual = () => {
+    if (!historiaActual?.id || !onEliminarHistoria) return;
+
+    Alert.alert(
+      'Borrar historia',
+      'Esta historia se eliminara de forma permanente. ¿Continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Borrar',
+          style: 'destructive',
+          onPress: async () => {
+            await onEliminarHistoria(historiaActual);
+          },
+        },
+      ]
+    );
   };
 
   if (!usuario) return null;
@@ -197,9 +222,15 @@ export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuar
         onTiempoCompleto={irSiguiente}
       />
 
-      <TouchableOpacity style={styles.botonX} onPress={alCerrar}>
-        <Ionicons name="close" size={34} color="white" />
-      </TouchableOpacity>
+      <View style={styles.accionesSuperiores}>
+        <TouchableOpacity style={styles.botonAccion} onPress={confirmarEliminarHistoriaActual}>
+          <Ionicons name="trash-outline" size={24} color="white" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.botonAccion} onPress={alCerrar}>
+          <Ionicons name="close" size={30} color="white" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -207,5 +238,20 @@ export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuar
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'black' },
   capaToques: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 10 },
-  botonX: { position: 'absolute', top: 55, right: 20, zIndex: 30 }
+  accionesSuperiores: {
+    position: 'absolute',
+    top: 55,
+    right: 20,
+    zIndex: 30,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  botonAccion: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

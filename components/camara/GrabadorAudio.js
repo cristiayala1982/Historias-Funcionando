@@ -57,7 +57,7 @@ export default function GrabadorAudio({ onEnviar }) {
         onPressOut={detenerGrabacion}
         style={styles.boton}
       >
-        <Ionicons name="mic" size={28} color={grabando ? "#ff4444" : "white"} />
+        <Ionicons name="mic" size={24} color={grabando ? "#ff4444" : "#0B3B60"} />
       </TouchableOpacity>
     </View>
   );
@@ -69,7 +69,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 60, // Mismo tamaño que tu botón de micrófono
   },
-  boton: { padding: 10 },
+  boton: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    backgroundColor: '#EAF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#CFE6FB',
+  },
   indicadorFlotante: {
     position: 'absolute',
     right: 50, // Se despliega hacia la izquierda desde el botón

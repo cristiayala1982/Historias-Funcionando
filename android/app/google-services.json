@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "90055872040",
+    "project_id": "historiaslab-7672a",
+    "storage_bucket": "historiaslab-7672a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:90055872040:android:e804ce410b1821ea736f1d",
+        "android_client_info": {
+          "package_name": "com.cristianayala.historiaslab"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAO2cxBBLkzpi6OmEMj6Qi49srNdeYM83g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

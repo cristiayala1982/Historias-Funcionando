@@ -8,16 +8,16 @@ export default function LayoutTabs() {
       tabBarHideOnKeyboard: true,       // Oculta la barra si se abre el teclado
     }}>
 
-      {/* 📁 PANTALLA 1: Chats */}
+      {/* 📁 PANTALLA 1: Historias HLS */}
+      <Tabs.Screen 
+        name="home3/index" 
+        options={{ title: 'Laboratorio Historias HLS' }} 
+      />
+
+      {/* 📁 PANTALLA 2: Chats */}
       <Tabs.Screen 
         name="chats/index" 
         options={{ title: 'Laboratorio Chat' }} 
-      />
-            
-      {/* 📁 PANTALLA 2: Historias con Kotlin */}
-      <Tabs.Screen 
-        name="homekotlin/index" 
-        options={{ title: 'Laboratorio historias con kotlin' }} 
       />
 
     </Tabs>

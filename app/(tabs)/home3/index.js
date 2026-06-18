@@ -3,15 +3,15 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, Dimensions, FlatList, Modal, NativeModules, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, BackHandler, Dimensions, FlatList, Modal, NativeModules, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 // --- COMPONENTES ---
 import VistaPrevia from '../../../components/camara/VistaPrevia';
 import { comprimirVideoPro } from '../../../components/componentes_home3/compresor3';
 import ReproductorItem from '../../../components/componentes_home3/ReproductorVideo.js';
 // --- FIREBASE ---
-import { addDoc, collection, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
+import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, where, writeBatch } from 'firebase/firestore';
+import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 import { db, storage } from '../../../firebaseConfig';
 // === FIN: IMPORTACIONES ===
 
@@ -81,7 +81,7 @@ export default function Home3() {
       const users = snapU.docs.map(d => ({ id: d.id, ...d.data() }));
       const qH = query(collection(db, "historias_hls"), orderBy("fecha", "asc"));
       onSnapshot(qH, (snapH) => {
-        const stories = snapH.docs.map(d => d.data());
+        const stories = snapH.docs.map(d => ({ id: d.id, ...d.data() }));
         const usersFinal = users.map(u => ({
           ...u,
           historias: stories.filter(h => h.usuarioId === u.id),
@@ -195,6 +195,73 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
     setIndiceUsuarioActivo(null);
   };
 
+  const eliminarArchivoStorageSiExiste = async (archivoRefOrUrl) => {
+    if (!archivoRefOrUrl || typeof archivoRefOrUrl !== 'string') return;
+    try {
+      await deleteObject(ref(storage, archivoRefOrUrl));
+    } catch (error) {
+      if (error?.code !== 'storage/object-not-found') {
+        console.warn('⚠️ No se pudo borrar archivo en Storage:', error?.message || error);
+      }
+    }
+  };
+
+  const eliminarHistoriaIndividual = async (historia) => {
+    if (!historia?.id) return;
+
+    await eliminarArchivoStorageSiExiste(historia.url);
+    if (historia.thumbnail && historia.thumbnail !== historia.url) {
+      await eliminarArchivoStorageSiExiste(historia.thumbnail);
+    }
+
+    await deleteDoc(doc(db, "historias_hls", historia.id));
+  };
+
+  const eliminarHistoriasUsuario = async (usuario) => {
+    if (!usuario?.id) return;
+
+    const qHistoriasUsuario = query(
+      collection(db, "historias_hls"),
+      where("usuarioId", "==", usuario.id)
+    );
+
+    const snapHistorias = await getDocs(qHistoriasUsuario);
+    if (snapHistorias.empty) {
+      Alert.alert("Sin historias", `${usuario.nombre} no tiene historias para borrar.`);
+      return;
+    }
+
+    const batch = writeBatch(db);
+    for (const historiaDoc of snapHistorias.docs) {
+      const data = historiaDoc.data();
+      await eliminarArchivoStorageSiExiste(data?.url);
+      if (data?.thumbnail && data.thumbnail !== data.url) {
+        await eliminarArchivoStorageSiExiste(data.thumbnail);
+      }
+      batch.delete(historiaDoc.ref);
+    }
+    await batch.commit();
+  };
+
+  const confirmarEliminarHistoriasUsuario = (usuario) => {
+    if (!usuario?.id) return;
+
+    Alert.alert(
+      "Borrar todas",
+      `Se borraran todas las historias de ${usuario.nombre}. ¿Continuar?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Borrar todo",
+          style: "destructive",
+          onPress: async () => {
+            await eliminarHistoriasUsuario(usuario);
+          }
+        }
+      ]
+    );
+  };
+
   const alCambiarDeCelda = useRef(({ viewableItems }) => {
     if (viewableItems.length > 0) {
       const nuevoIndex = viewableItems[0].index;
@@ -245,9 +312,13 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
 
   return (
     <View style={styles.container}>
+      <View style={styles.backgroundBlobTop} />
+      <View style={styles.backgroundBlobBottom} />
+
       <View style={styles.headerContainer}>
-        <Text style={styles.header}>LABORATORIO HLS</Text>
-        <Text style={styles.subHeader}>Streaming Adaptativo Pro</Text>
+        <Text style={styles.kicker}>HISTORIASLAB</Text>
+        <Text style={styles.header}>Laboratorio HLS</Text>
+        <Text style={styles.subHeader}>Streaming adaptativo y pruebas multimedia</Text>
       </View>
 
       <View style={styles.inputArea}>
@@ -293,7 +364,17 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
               
               {/* INFO + PORCENTAJE */}
               <View style={styles.infoTester}>
-                <Text style={styles.nombreTester}>{u.nombre}</Text>
+                <View style={styles.filaNombreAcciones}>
+                  <Text style={styles.nombreTester}>{u.nombre}</Text>
+                  {cantidadHistorias > 0 && (
+                    <TouchableOpacity
+                      style={styles.btnBorrarTodas}
+                      onPress={() => confirmarEliminarHistoriasUsuario(u)}
+                    >
+                      <Ionicons name="trash" size={16} color="#FF3B30" />
+                    </TouchableOpacity>
+                  )}
+                </View>
                 {publicandoId === u.id && (
                   <Text style={styles.subiendoTxt}>
                     ⚡ Subiendo: {Math.round(progresoSubida)}%
@@ -329,6 +410,7 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
                 <ReproductorItem
                   usuario={item}
                   estaActivo={index === indiceUsuarioActivo} 
+                  onEliminarHistoria={eliminarHistoriaIndividual}
                   irSiguienteUsuario={() => {
                     if (index < usuariosConHistorias.length - 1) {
                       flatListRef.current?.scrollToIndex({ index: index + 1, animated: true });
@@ -355,15 +437,92 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
 // Tus estilos se mantienen intactos tal cual los tenés guardados abajo...
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: '#F4F8FB' },
   modalContainer: { flex: 1, backgroundColor: 'black' },
-  headerContainer: { marginTop: 60, marginBottom: 10, alignItems: 'center' },
-  header: { fontWeight: '900', fontSize: 16, letterSpacing: 2, color: '#000' },
-  subHeader: { color: '#007AFF', fontSize: 11, fontWeight: 'bold', marginTop: 2 },
-  inputArea: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 15, gap: 12, alignItems: 'center' },
-  input: { flex: 1, backgroundColor: '#F2F2F7', borderRadius: 15, paddingHorizontal: 18, height: 55, color: '#000', fontSize: 15 },
-  btnAgregar: { backgroundColor: '#007AFF', width: 55, height: 55, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
-  listaUsuarios: { flex: 1, marginTop: 10, paddingHorizontal: 20 },
+  backgroundBlobTop: {
+    position: 'absolute',
+    top: -75,
+    right: -55,
+    width: 230,
+    height: 230,
+    borderRadius: 115,
+    backgroundColor: '#DDF0FF',
+  },
+  backgroundBlobBottom: {
+    position: 'absolute',
+    bottom: 90,
+    left: -70,
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    backgroundColor: '#FFE8D2',
+  },
+  headerContainer: {
+    marginTop: 52,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    backgroundColor: '#0B3B60',
+    borderRadius: 22,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    shadowColor: '#0B3B60',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  kicker: {
+    color: '#A5D8FF',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.3,
+  },
+  header: {
+    marginTop: 6,
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  subHeader: {
+    color: '#DCEEFF',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 7,
+  },
+  inputArea: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginTop: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 10,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#D8EAF8',
+  },
+  input: {
+    flex: 1,
+    backgroundColor: '#F7FBFF',
+    borderRadius: 13,
+    paddingHorizontal: 16,
+    height: 50,
+    color: '#102A43',
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: '#E5F0F9',
+  },
+  btnAgregar: {
+    backgroundColor: '#0B3B60',
+    width: 50,
+    height: 50,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  listaUsuarios: { flex: 1, marginTop: 12, paddingHorizontal: 20 },
   cameraContainer: { flex: 1, backgroundColor: 'black' },
   btnCerrarCam: { position: 'absolute', top: 50, left: 20, backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 25 },
   
@@ -371,12 +530,17 @@ const styles = StyleSheet.create({
   tarjetaTester: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    backgroundColor: '#F9F9F9', 
+    backgroundColor: '#FFFFFF', 
     padding: 16, 
     borderRadius: 18, 
     marginBottom: 12, 
     borderWidth: 1, 
-    borderColor: '#EAEAEA' 
+    borderColor: '#D8EAF8',
+    shadowColor: '#2C4A65',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
   },
 
   // ¡NUEVO! Contenedor que encierra al avatar y permite al globo flotar en la esquina
@@ -428,16 +592,35 @@ const styles = StyleSheet.create({
   // Modificado: Ajustado el margen izquierdo a 18 para no pisarse con el globo
   infoTester: { flex: 1, marginLeft: 18 },
 
+  filaNombreAcciones: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
   // Modificado: Subió el tamaño de la letra a 17 para equilibrar el diseño
   nombreTester: { fontSize: 17, fontWeight: 'bold', color: '#212529' },
 
+  btnBorrarTodas: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FFEAEA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   // Modificado: ¡Letras grandes de subida! Saltó a 14px, negrita gruesa y un coral vibrante
   subiendoTxt: { 
-    fontSize: 14, 
+    fontSize: 13, 
     fontWeight: '700', 
-    color: '#FF512F', 
+    color: '#0B7A45', 
     marginTop: 4 
   },
 
-  btnMas: { padding: 5 }
+  btnMas: {
+    padding: 6,
+    backgroundColor: '#EAF4FF',
+    borderRadius: 16,
+  }
 });
