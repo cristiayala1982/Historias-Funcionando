@@ -48,7 +48,11 @@ export default function BarraProgreso({
     let tiempoTotalHistoria = 0;
 
     if (esFoto) {
-      // Si es foto, le clavamos 5000 milisegundos (5 segundos) de duración fija
+      // Para fotos: esperar a que la imagen completa haya cargado (igual que video)
+      if (!videoCargado) {
+        if (timerRef.current) clearInterval(timerRef.current);
+        return;
+      }
       tiempoTotalHistoria = 5000;
     } else {
       // Si es video, validamos que ya esté cargado y tenga duración real
@@ -86,23 +90,42 @@ export default function BarraProgreso({
   }, [idxHistoria, estaActivo, pausadoManual, videoCargado, duracionVideo, esFoto]);
 
   return (
-    <View style={styles.contenedorBarras}>
-      {historias.map((_, i) => (
-        <View key={i} style={styles.fondoBarra}>
-          <View 
-            style={[
-              styles.rellenoBarra, 
-              { width: i < idxHistoria ? '100%' : i === idxHistoria ? `${progreso}%` : '0%' }
-            ]} 
-          />
-        </View>
-      ))}
+    <View style={styles.fondoSuperior}>
+      <View style={styles.contenedorBarras}>
+        {historias.map((_, i) => (
+          <View key={i} style={styles.fondoBarra}>
+            <View 
+              style={[
+                styles.rellenoBarra, 
+                { width: i < idxHistoria ? '100%' : i === idxHistoria ? `${progreso}%` : '0%' }
+              ]} 
+            />
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  contenedorBarras: { position: 'absolute', top: 40, left: 10, right: 10, flexDirection: 'row', gap: 5, zIndex: 20 },
+  // Capa que cubre la zona superior con fondo oscuro para que la barra e iconos siempre sean visibles
+  fondoSuperior: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 95,
+    zIndex: 20,
+    backgroundColor: 'rgba(0,0,0,0.52)',
+  },
+  contenedorBarras: {
+    position: 'absolute',
+    top: 40,
+    left: 10,
+    right: 10,
+    flexDirection: 'row',
+    gap: 5,
+  },
   fondoBarra: { flex: 1, height: 3, backgroundColor: 'rgba(255,255,255,0.4)', borderRadius: 2, overflow: 'hidden' },
   rellenoBarra: { height: '100%', backgroundColor: 'white' }
 });

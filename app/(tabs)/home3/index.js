@@ -1,6 +1,7 @@
 // === INICIO: IMPORTACIONES ===
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, BackHandler, Dimensions, FlatList, Modal, NativeModules, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -128,6 +129,21 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
     try {
       // Usamos un ID consistente: usuario + timestamp
       const archivoId = `${idUsuarioDestino}_${Date.now()}`;
+      let fotoPreviewLocalUri = null;
+
+      if (tipo === 'foto') {
+        try {
+          // Prepara una versión liviana para mostrar instantáneamente en historias.
+          const preview = await manipulateAsync(
+            uri,
+            [{ resize: { width: 280 } }],
+            { compress: 0.2, format: SaveFormat.JPEG }
+          );
+          fotoPreviewLocalUri = preview.uri;
+        } catch (previewError) {
+          console.warn('⚠️ No se pudo generar preview de foto:', previewError?.message || previewError);
+        }
+      }
       
       const respuesta = await fetch(uri);
       const blobArchivo = await respuesta.blob();
@@ -153,6 +169,27 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
           const urlPrincipal = await getDownloadURL(uploadTask.snapshot.ref);
           let urlThumbnail = null;
 
+          if (tipo === 'foto' && fotoPreviewLocalUri) {
+            try {
+              const respuestaPreview = await fetch(fotoPreviewLocalUri);
+              const blobPreview = await respuestaPreview.blob();
+              const previewRef = ref(storage, `fotos_lab/preview_${archivoId}.jpg`);
+              const uploadPreviewTask = uploadBytesResumable(
+                previewRef,
+                blobPreview,
+                { contentType: 'image/jpeg' }
+              );
+
+              await new Promise((resolve, reject) => {
+                uploadPreviewTask.on('state_changed', () => {}, reject, resolve);
+              });
+
+              urlThumbnail = await getDownloadURL(uploadPreviewTask.snapshot.ref);
+            } catch (errorPreviewUpload) {
+              console.warn('⚠️ No se pudo subir preview de foto:', errorPreviewUpload?.message || errorPreviewUpload);
+            }
+          }
+
           // ... (mantén tu lógica de subir miniatura tal cual la tenías) ...
           if (thumbnailUri && tipo !== 'foto') {
              // ... lógica de fetch y uploadBytesResumable para miniatura ...
@@ -162,7 +199,7 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
           // Esto crea el documento de forma atómica y limpia
           await setDoc(doc(db, "historias_hls", archivoId), { 
             url: urlPrincipal, 
-            thumbnail: tipo === 'foto' ? urlPrincipal : urlThumbnail, 
+            thumbnail: tipo === 'foto' ? (urlThumbnail || urlPrincipal) : urlThumbnail, 
             usuarioId: idUsuarioDestino, 
             fecha: serverTimestamp(),
             tipo: tipo === 'foto' ? 'foto' : 'video' // Ya no ponemos hls_pending
@@ -173,6 +210,9 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
           try {
             await FileSystem.deleteAsync(uri, { idempotent: true });
             if (thumbnailUri) await FileSystem.deleteAsync(thumbnailUri, { idempotent: true });
+            if (fotoPreviewLocalUri && fotoPreviewLocalUri !== uri) {
+              await FileSystem.deleteAsync(fotoPreviewLocalUri, { idempotent: true });
+            }
           } catch (e) {}
           
           setPublicandoId(null);
@@ -256,6 +296,30 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
           style: "destructive",
           onPress: async () => {
             await eliminarHistoriasUsuario(usuario);
+          }
+        }
+      ]
+    );
+  };
+
+  const eliminarUsuario = async (usuario) => {
+    if (!usuario?.id) return;
+    await eliminarHistoriasUsuario(usuario);
+    await deleteDoc(doc(db, "usuarios_hls", usuario.id));
+  };
+
+  const confirmarEliminarUsuario = (usuario) => {
+    if (!usuario?.id) return;
+    Alert.alert(
+      "Borrar usuario",
+      `Se borrará a ${usuario.nombre} y TODAS sus historias. ¿Continuar?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Borrar usuario",
+          style: "destructive",
+          onPress: async () => {
+            await eliminarUsuario(usuario);
           }
         }
       ]
@@ -364,8 +428,8 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
               
               {/* INFO + PORCENTAJE */}
               <View style={styles.infoTester}>
-                <View style={styles.filaNombreAcciones}>
-                  <Text style={styles.nombreTester}>{u.nombre}</Text>
+                <Text style={styles.nombreTester}>{u.nombre}</Text>
+                <View style={styles.filaBotones}>
                   {cantidadHistorias > 0 && (
                     <TouchableOpacity
                       style={styles.btnBorrarTodas}
@@ -374,6 +438,12 @@ const finalizarYSubirHLS = async ({ uri, thumbnailUri, idUsuarioDestino, tipo })
                       <Ionicons name="trash" size={16} color="#FF3B30" />
                     </TouchableOpacity>
                   )}
+                  <TouchableOpacity
+                    style={styles.btnBorrarTodas}
+                    onPress={() => confirmarEliminarUsuario(u)}
+                  >
+                    <Ionicons name="person-remove" size={16} color="#FF3B30" />
+                  </TouchableOpacity>
                 </View>
                 {publicandoId === u.id && (
                   <Text style={styles.subiendoTxt}>
@@ -596,6 +666,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginTop: 8,
+  },
+
+  filaBotones: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 8,
   },
 
   // Modificado: Subió el tamaño de la letra a 17 para equilibrar el diseño

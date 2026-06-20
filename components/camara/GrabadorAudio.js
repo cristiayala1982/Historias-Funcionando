@@ -3,12 +3,13 @@ import { Audio } from 'expo-av';
 import { useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export default function GrabadorAudio({ onEnviar }) {
+export default function GrabadorAudio({ onEnviar, onIniciarGrabacion }) {
   const recorderRef = useRef(null);
   const [grabando, setGrabando] = useState(false);
 
   const empezarGrabacion = async () => {
     try {
+      onIniciarGrabacion?.();
       await Audio.requestPermissionsAsync();
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,

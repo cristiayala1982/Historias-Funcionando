@@ -4,7 +4,7 @@
     "slug": "historiaslab",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/nuevo_icon.png",
+    "icon": "./assets/images/nuevo_icon_square.png",
     "scheme": "historiaslab",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -16,7 +16,7 @@
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/nuevo_icon.png"
+        "foregroundImage": "./assets/images/nuevo_icon_square.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -44,11 +44,18 @@
         }
       ],
       "react-native-compressor",
-      "expo-video"
+      "expo-video",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b96ce03b-9dcc-44a4-8d22-ccd0098f3fdf"
+      }
     }
   }
 }

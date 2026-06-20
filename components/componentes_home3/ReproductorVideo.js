@@ -26,7 +26,7 @@ export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuar
   const historiaSiguiente = historiasActuales[idxHistoria + 1];
 
   const urlActual = obtenerUrlPublica(historiaActual?.url);
-  const thumbnailActual = historiaActual?.thumbnail;
+  const thumbnailActual = obtenerUrlPublica(historiaActual?.thumbnail);
   const esFoto = historiaActual?.tipo === 'foto';
 
   const urlSiguiente = obtenerUrlPublica(historiaSiguiente?.url);
@@ -84,8 +84,18 @@ export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuar
 
     if (esFoto) {
       setDuracionVideo(5000);
-      setVideoCargado(true);
-      setMostrarMiniatura(false);
+      // Para fotos: mantenemos la miniatura visible hasta que cargue la imagen final.
+      setVideoCargado(false);
+      setMostrarMiniatura(true);
+      // Fallback: si la imagen ya está en caché, onLoad puede no dispararse.
+      // Después de 1 segundo forzamos el inicio de la barra de todas formas.
+      const fallback = setTimeout(() => {
+        if (estaMontadoRef.current) {
+          setVideoCargado(true);
+          setMostrarMiniatura(false);
+        }
+      }, 1000);
+      return () => clearTimeout(fallback);
     } else if (reproductorActivo) {
       
       const verificarEstadoVideo = () => {
@@ -178,6 +188,13 @@ export default function ReproductorVideo({ usuario, estaActivo, irSiguienteUsuar
                 setMostrarMiniatura(false);
               }
             }}
+            onError={() => {
+              if (estaMontadoRef.current && estaActivo) {
+                // Evita quedarse en carga infinita si la foto falla.
+                setVideoCargado(true);
+                setMostrarMiniatura(false);
+              }
+            }}
           />
         )}
 
@@ -250,7 +267,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -220,6 +220,14 @@ export default function ChatScreen() {
       estado: 'enviado',
       localUri: ''
     }, { merge: true });
+
+    try {
+      if (uriAudio?.startsWith('file://')) {
+        await FileSystem.deleteAsync(uriAudio, { idempotent: true });
+      }
+    } catch (error) {
+      console.warn('No se pudo borrar el audio local subido:', error?.message || error);
+    }
   };
 
   const reintentarAudio = async (mensaje) => {
@@ -399,6 +407,16 @@ return (
             id={item.id}
             isPlaying={audioSonandoId === item.id} 
             onPlay={(id) => setAudioSonandoId(id)} 
+            onEnded={(audioId) => {
+              const idxMensaje = mensajes.findIndex(m => m.id === audioId);
+              const siguienteMensaje = idxMensaje > 0 ? mensajes[idxMensaje - 1] : null;
+
+              if (siguienteMensaje?.tipo === 'audio' && siguienteMensaje?.fileUrl) {
+                setAudioSonandoId(siguienteMensaje.id);
+              } else {
+                setAudioSonandoId(null);
+              }
+            }} 
           />
         ) : (
           <View style={styles.audioPendienteContainer}>
@@ -436,7 +454,7 @@ return (
         <View style={styles.inputWrapper}>
           {texto.length === 0 && (
             <TouchableOpacity style={{ marginRight: 10 }} onPress={abrirCamaraNativa}>
-              <Ionicons name="camera" size={28} color="white" />
+              <Ionicons name="camera" size={28} color="#007AFF" />
             </TouchableOpacity>
           )}
           
@@ -455,7 +473,7 @@ return (
             </TouchableOpacity>
           ) : (
 // ... dentro de tu GrabadorAudio ...
-<GrabadorAudio onEnviar={async (uriAudio) => {
+<GrabadorAudio onIniciarGrabacion={() => setAudioSonandoId(null)} onEnviar={async (uriAudio) => {
   const mensajeId = `chat_audio_${Date.now()}`;
 
   await setDoc(doc(db, 'chat_laboratorio', mensajeId), {
